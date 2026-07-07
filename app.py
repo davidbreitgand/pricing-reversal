@@ -136,9 +136,9 @@ if os.path.exists(logo_path):
 st.sidebar.title("Price Reversal Explorer")
 st.sidebar.caption(
     "Cheaper API price ≠ cheaper to use. "
-    "We evaluate 8 frontier reasoning models across 9 tasks and find that "
-    "in 21.8% of comparisons, the cheaper-listed model actually costs more, "
-    "because thinking tokens vary up to 860% across models and dominate actual costs."
+    "We evaluate 8 frontier reasoning models across 12 tasks (9 single-turn + 3 agentic) "
+    "and find that in ~32% of comparisons, the cheaper-listed model actually costs more, "
+    "because thinking tokens vary dramatically across models and dominate actual costs."
 )
 st.sidebar.markdown(
     "📄 [Paper](https://arxiv.org/abs/2603.23971) · "
@@ -183,12 +183,12 @@ if page == "🔄 Pricing Reversal":
     # Initialize defaults in session state (avoids index reset on rerun)
     if "reversal_model_a" not in st.session_state:
         st.session_state["reversal_model_a"] = (
-            "gemini-3-flash-preview"
-            if "gemini-3-flash-preview" in models_in_data
+            "gemini-3-flash"
+            if "gemini-3-flash" in models_in_data
             else models_in_data[0]
         )
     if "reversal_model_b" not in st.session_state:
-        default_b = "gpt-5.2-high" if "gpt-5.2-high" in models_in_data else models_in_data[0]
+        default_b = "gpt-5.4" if "gpt-5.4" in models_in_data else models_in_data[0]
         if default_b == st.session_state["reversal_model_a"] and len(models_in_data) > 1:
             default_b = [m for m in models_in_data if m != st.session_state["reversal_model_a"]][0]
         st.session_state["reversal_model_b"] = default_b
@@ -640,8 +640,8 @@ elif page == "⚔️ Query-Level Comparison":
         model_a = st.selectbox(
             "Model A",
             available,
-            index=available.index("gemini-3-flash-preview")
-            if "gemini-3-flash-preview" in available
+            index=available.index("gemini-3-flash")
+            if "gemini-3-flash" in available
             else 0,
             format_func=lambda x: sn(short_names, x),
             key="qlc_a",
@@ -651,8 +651,8 @@ elif page == "⚔️ Query-Level Comparison":
         model_b = st.selectbox(
             "Model B",
             avail_b,
-            index=avail_b.index("gpt-5.2-high")
-            if "gpt-5.2-high" in avail_b
+            index=avail_b.index("gpt-5.4")
+            if "gpt-5.4" in avail_b
             else 0,
             format_func=lambda x: sn(short_names, x),
             key="qlc_b",
