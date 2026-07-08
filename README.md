@@ -146,9 +146,9 @@ Then open [http://localhost:8501](http://localhost:8501) in your browser. The ap
 
 | View | What it shows |
 |------|---------------|
-| **� Pricing Reversal** | Listed price vs. actual expense for every dataset×model pair. Highlights cases where "cheaper" models cost more. |
+| **🔄 Pricing Reversal** | Listed price vs. actual expense for every dataset×model pair. Highlights cases where "cheaper" models cost more. |
 | **📊 Cost Breakdown** | Per-model token and cost decomposition (prompt / thinking / completion) across datasets. |
-| **� Per-Query Deep Dive** | Pick a dataset + query index to see every model's thinking tokens, cost, score, and **full response text** side by side. |
+| **🔍 Per-Query Deep Dive** | Pick a dataset + query index to see every model's thinking tokens, cost, score, and **full response text** side by side. |
 | **⚔️ Query-Level Comparison** | Select two models to compare query by query — scatter plots, reversal detection, and a drill-down with side-by-side responses and token details. |
 | **🎲 Repeated Trial Variance** | Visualize how the same query sent to the same model 5× produces wildly different thinking token counts and costs (AIME dataset). |
 

@@ -206,3 +206,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 .DS_Store
+
+# Local-only: internal notes on paper data issues (do NOT publish)
+PAPER_DATA_ISSUES.md
