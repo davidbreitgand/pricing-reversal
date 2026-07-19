@@ -109,6 +109,10 @@ class PriceReversalData:
         useful for offline work or pre-publication testing.
     """
 
+    # repeated-trial spread: what to measure, and how to rank tasks by its swing
+    _DIMENSIONS = {"cost": "cost", "thinking": "thinking_tokens"}
+    _METRICS = {"maxmin": "ratio_maxmin", "cv": "cv", "std": "std"}
+
     def __init__(self, revision=DEFAULT_REVISION, main_zip=None, extras_zip=None):
         self.revision = revision
         self._main_path = main_zip
@@ -373,6 +377,122 @@ class PriceReversalData:
                                "listed_ratio", "reversal"]
         return out[cols].reset_index(drop=True)
 
+    # ---------------- repeated trials ----------------
+
+    def repeated_benchmarks(self):
+        """Benchmarks that ship repeated-trial runs in the extras zip."""
+        z = self._extras_zip()
+        if z is None:
+            return []
+        return sorted({n.split("/")[1] for n in z.namelist()
+                       if n.startswith("repeated_trials/") and n.endswith(".json")})
+
+    def repeated_records(self, benchmark, model):
+        """Long table of a model's repeated runs: one row per (task_id, run_index)
+        with cost, token split, and outcome. Reads the `unified-v1-repeated`
+        payloads (repeated_trials/<benchmark>/<model>.json) from the extras zip."""
+        z = self._extras_zip()
+        if z is None:
+            raise RuntimeError(f"repeated trials live in {EXTRAS_ZIP}; see the warning above")
+        self._check(benchmark, self.repeated_benchmarks(), "benchmark (with repeated trials)")
+        self._check(model, self._repeated_models(benchmark),
+                    f"model (repeated trials on {benchmark})")
+        payload = json.loads(z.read(f"repeated_trials/{benchmark}/{model}.json"))
+        texts = self.texts(benchmark)
+        rows = []
+        for t in payload["trials"]:
+            tok = t.get("tokens") or {}
+            reasoning = tok.get("reasoning")
+            output = tok.get("output") or 0
+            meta = t.get("metadata") or {}
+            text = texts.get(str(t["task_id"]), {})
+            gt = meta.get("ground_truth")
+            rows.append({
+                "task_id": str(t["task_id"]),
+                "run_index": t.get("run_index"),
+                "cost": t.get("cost_usd"),
+                "input_tokens": tok.get("input"),
+                "cached_tokens": tok.get("cache"),
+                "visible_tokens": output,
+                "thinking_tokens": reasoning if reasoning is not None else float("nan"),
+                "completion_tokens": output + (reasoning or 0),
+                "correct": t.get("correct"),
+                "prediction": meta.get("prediction"),
+                "ground_truth": gt if gt is not None else text.get("ground_truth"),
+                "task_text": text.get("task_text"),
+                "origin_query": text.get("origin_query"),
+            })
+        return (pd.DataFrame(rows)
+                  .sort_values(["task_id", "run_index"]).reset_index(drop=True))
+
+    def repeated_stats(self, benchmark, model, dimension="cost"):
+        """Per-task summary of run-to-run spread for `dimension` in {cost, thinking}:
+        min/median/max/mean/std, CV (std/mean), max/min ratio, and whether the
+        outcome flipped across runs."""
+        if dimension not in self._DIMENSIONS:
+            raise KeyError(f"dimension must be one of {list(self._DIMENSIONS)}")
+        col = self._DIMENSIONS[dimension]
+        df = self.repeated_records(benchmark, model)
+        if df[col].isna().all():
+            raise KeyError(f"{dimension!r} is not recorded for {model} on {benchmark} "
+                           f"(e.g. tb2 has no thinking-token split); try --dimension cost")
+        rows = []
+        for tid, g in df.groupby("task_id", sort=False):
+            vals = g[col].dropna()
+            if vals.empty:
+                continue
+            n = len(vals)
+            vmin, vmax, mean = float(vals.min()), float(vals.max()), float(vals.mean())
+            std = float(vals.std(ddof=1)) if n > 1 else 0.0
+            corr = g["correct"].dropna()
+            n_pass = int((corr > 0).sum())
+            rows.append({
+                "task_id": tid, "n_runs": n,
+                "n_correct": (n_pass if len(corr) else None),
+                "n_graded": len(corr),
+                "flip": bool(0 < n_pass < len(corr)) if len(corr) else False,
+                f"{dimension}_mean": mean,
+                f"{dimension}_median": float(vals.median()),
+                f"{dimension}_min": vmin,
+                f"{dimension}_max": vmax,
+                f"{dimension}_std": std,
+                f"{dimension}_cv": (std / mean if mean else float("nan")),
+                f"{dimension}_ratio_maxmin": (vmax / vmin if vmin > 0 else float("nan")),
+            })
+        return pd.DataFrame(rows)
+
+    def repeated_summary(self, benchmark, model, dimension="cost"):
+        """Model-level rollup of `repeated_stats` (median CV, worst ratio, flip rate)."""
+        st = self.repeated_stats(benchmark, model, dimension)
+        cv = st[f"{dimension}_cv"].dropna()
+        ratio = st[f"{dimension}_ratio_maxmin"].dropna()
+        graded = int((st["n_graded"] > 0).sum())
+        worst_task = st.loc[ratio.idxmax(), "task_id"] if not ratio.empty else None
+        return {
+            "benchmark": benchmark, "model": model, "dimension": dimension,
+            "n_tasks": int(len(st)),
+            "n_runs": int(st["n_runs"].max()) if len(st) else 0,
+            "median_cv": float(cv.median()) if not cv.empty else float("nan"),
+            "pct_ratio_gt_2x": float((ratio > 2).mean()) if not ratio.empty else float("nan"),
+            "n_flipped": int(st["flip"].sum()),
+            "pct_flipped": (float(st["flip"].sum() / graded) if graded else float("nan")),
+            "worst_ratio": float(ratio.max()) if not ratio.empty else float("nan"),
+            "worst_task": worst_task,
+        }
+
+    def find_variable(self, benchmark, model, dimension="cost", metric="maxmin",
+                      flips_only=False, top_k=10):
+        """Rank a model's tasks by run-to-run variability of `dimension`.
+        metric: maxmin (max/min ratio), cv (coeff. of variation), or std."""
+        if metric not in self._METRICS:
+            raise KeyError(f"metric must be one of {list(self._METRICS)}")
+        st = self.repeated_stats(benchmark, model, dimension)
+        if flips_only:
+            st = st[st["flip"]]
+        key = f"{dimension}_{self._METRICS[metric]}"
+        return (st.sort_values(key, ascending=False, na_position="last")
+                  .head(top_k).reset_index(drop=True))
+
 
 LAST_FIND_FILE = ".case_study_last_find.json"
 
@@ -635,12 +755,255 @@ huggingface.co/datasets/{HF_REPO_ID}</div>
 </div><div id="tip"></div><script>{_VIZ_JS}</script></body></html>"""
 
 
-def to_csv(df, path):
+SPREAD_FIELD_NOTES = """\
+Field definitions (price-reversal repeated-trial spread export)
+---------------------------------------------------------------
+one row per task: the same model run on the same task <n_runs> independent times.
+
+task_id            benchmark task identifier
+n_runs             independent repeated runs of this task by this model
+n_correct          how many of those runs were graded correct (blank where the
+                   benchmark records no correctness for these runs)
+flip               True if the outcome changed across runs (sometimes right,
+                   sometimes wrong) — identical input, different verdict
+<dim>_mean         mean of the measured dimension across the runs, where
+<dim>_median         dim = cost (platform-billed USD) or thinking (hidden
+<dim>_min            reasoning tokens)
+<dim>_max
+<dim>_std          sample standard deviation across runs (ddof=1)
+<dim>_cv           coefficient of variation = std / mean (unitless spread)
+<dim>_ratio_maxmin max / min across runs — "the priciest run cost N x the
+                   cheapest run of the same task"
+
+Data: https://huggingface.co/datasets/price-reversal/price-reversal
+"""
+
+
+_SPREAD_CSS = """
+.sp-axis { position:relative; height:16px; margin:2px 0 8px; }
+.sp-axis span { position:absolute; transform:translateX(-50%); font-size:10px;
+  color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.sp-row { display:grid; grid-template-columns:150px 1fr 118px; align-items:center;
+  gap:12px; margin:6px 0; }
+.sp-row .name { font-size:11px; line-height:1.2; color:var(--ink-1); text-align:right;
+  word-break:break-word; }
+.sp-row .val { font-size:12px; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.sp-track { position:relative; height:20px; }
+.sp-line { position:absolute; top:9px; height:2px; background:var(--grid);
+  border-radius:2px; }
+.sp-mean { position:absolute; top:1px; height:18px; border-left:1.5px dashed var(--muted); }
+.sp-dot { position:absolute; top:4px; width:12px; height:12px; margin-left:-6px;
+  border-radius:50%; border:1px solid var(--surface-1); box-sizing:border-box; }
+.sp-dot.good { background:var(--good); } .sp-dot.bad { background:var(--bad); }
+.sp-dot.na { background:var(--muted); }
+"""
+
+
+def render_spread(data, benchmark, model, dimension="cost", metric="maxmin",
+                  flips_only=False, top_k=10, task_id=None):
+    """Readable report: how one model's cost (or thinking tokens) varies across
+    repeated runs of the same tasks, plus the most variable task's per-run bills."""
+    summ = data.repeated_summary(benchmark, model, dimension)
+    ranked = data.find_variable(benchmark, model, dimension, metric, flips_only, top_k)
+
+    def pct(x):
+        return "—" if pd.isna(x) else f"{x * 100:.0f}%"
+
+    def num(x, spec=".2f"):
+        return "—" if pd.isna(x) else format(x, spec)
+
+    lines = [
+        f"===== repeated-trial spread: {benchmark} / {model} =====",
+        f"{summ['n_tasks']} tasks x up to {summ['n_runs']} runs | "
+        f"dimension={dimension} | ranked by {metric}", "",
+        f"median {dimension} CV across tasks : {num(summ['median_cv'])}",
+        f"tasks with >2x max/min {dimension:<8}: {pct(summ['pct_ratio_gt_2x'])}",
+        f"worst max/min ratio               : {num(summ['worst_ratio'], ',.1f')}x "
+        f"(task {summ['worst_task']})",
+    ]
+    if not pd.isna(summ["pct_flipped"]):
+        lines.append(f"tasks whose outcome flipped       : {pct(summ['pct_flipped'])} "
+                     f"({summ['n_flipped']} tasks)")
+
+    lines += ["", f"---- top {len(ranked)} most variable tasks ----"]
+    cols = ["task_id", "n_runs", "n_correct",
+            f"{dimension}_min", f"{dimension}_median", f"{dimension}_max",
+            f"{dimension}_cv", f"{dimension}_ratio_maxmin"]
+    lines.append(ranked[cols].to_string(index=False) if len(ranked) else "(none)")
+
+    tid = str(task_id) if task_id is not None else (
+        ranked["task_id"].iloc[0] if len(ranked) else None)
+    if tid is not None:
+        recs = data.repeated_records(benchmark, model)
+        g = recs[recs["task_id"] == tid].sort_values("run_index")
+        if len(g):
+            first = g.iloc[0]
+            q = (first["origin_query"] if isinstance(first["origin_query"], str)
+                 else first["task_text"])
+            lines += ["", f"---- task {tid}: what varied across {len(g)} runs ----"]
+            if isinstance(q, str) and q:
+                lines.append(q[:1000] + ("…" if len(q) > 1000 else ""))
+            dcols = [c for c in ["run_index", "thinking_tokens", "visible_tokens",
+                                 "completion_tokens", "cost", "correct", "prediction"]
+                     if c in g.columns]
+            lines += ["", g[dcols].to_string(index=False)]
+    return "\n".join(lines)
+
+
+def render_spread_html(data, benchmark, model, dimension="cost", metric="maxmin",
+                       flips_only=False, top_k=10, task_id=None):
+    """Self-contained HTML page showing how one model's cost (or thinking tokens)
+    varies across repeated independent runs of the same tasks: a log-scale strip of
+    per-run dots (green solved / red failed), a min–max range bar, and a mean mark."""
+    import math
+    from html import escape as esc
+
+    summ = data.repeated_summary(benchmark, model, dimension)
+    ranked = data.find_variable(benchmark, model, dimension, metric, flips_only, top_k)
+    recs = data.repeated_records(benchmark, model)
+    col = PriceReversalData._DIMENSIONS[dimension]
+    is_cost = dimension == "cost"
+
+    def fval(v):
+        if pd.isna(v):
+            return "—"
+        if is_cost:
+            return f"${v:,.4f}" if v >= 0.01 else f"${v:.5f}"
+        return f"{int(round(v)):,}"
+
+    def pct(x):
+        return "—" if pd.isna(x) else f"{x * 100:.0f}%"
+
+    def num(x, spec=".2f"):
+        return "—" if pd.isna(x) else format(x, spec)
+
+    # shared log-x domain across the shown tasks so rows are directly comparable
+    shown = recs[recs["task_id"].isin(set(ranked["task_id"]))]
+    pos = shown[col][shown[col] > 0].dropna()
+    gmin = float(pos.min()) if not pos.empty else 1.0
+    gmax = float(pos.max()) if not pos.empty else 1.0
+    lmin = math.log10(gmin)
+    span = (math.log10(gmax) - lmin) or 1.0
+
+    def xpct(v):
+        if pd.isna(v) or v <= 0:
+            return 0.0
+        return max(0.0, min(100.0, 100.0 * (math.log10(v) - lmin) / span))
+
+    tiles = "".join([
+        f'<div class="tile"><div class="lbl">runs / task</div>'
+        f'<div class="val">{summ["n_runs"]}</div></div>',
+        f'<div class="tile"><div class="lbl">median {dimension} CV</div>'
+        f'<div class="val">{num(summ["median_cv"])}</div></div>',
+        f'<div class="tile"><div class="lbl">worst max/min</div>'
+        f'<div class="val">{num(summ["worst_ratio"], ",.1f")}&times;</div></div>',
+        f'<div class="tile"><div class="lbl">tasks &gt;2&times;</div>'
+        f'<div class="val">{pct(summ["pct_ratio_gt_2x"])}</div></div>',
+    ])
+    if not pd.isna(summ["pct_flipped"]):
+        tiles += (f'<div class="tile"><div class="lbl">outcome flipped</div>'
+                  f'<div class="val">{pct(summ["pct_flipped"])}</div></div>')
+
+    ticks = "".join(
+        f'<span style="left:{100 * i / 3:.1f}%">{esc(fval(10 ** (lmin + span * i / 3)))}</span>'
+        for i in range(4))
+    axis = (f'<div class="sp-row"><div class="name"></div>'
+            f'<div class="sp-axis">{ticks}</div><div class="val"></div></div>')
+
+    rows = ""
+    for _, s in ranked.iterrows():
+        tid = s["task_id"]
+        g = shown[shown["task_id"] == tid].sort_values("run_index")
+        vmin, vmax = s[f"{dimension}_min"], s[f"{dimension}_max"]
+        rng_tip = esc(f"{fval(vmin)}–{fval(vmax)} across {int(s['n_runs'])} runs")
+        line = (f'<div class="sp-line" style="left:{xpct(vmin):.2f}%;'
+                f'right:{100 - xpct(vmax):.2f}%" data-tip="{rng_tip}"></div>')
+        mean = f'<div class="sp-mean" style="left:{xpct(s[f"{dimension}_mean"]):.2f}%"></div>'
+        dots = ""
+        for _, r in g.iterrows():
+            v, c = r[col], r["correct"]
+            cls = "na" if pd.isna(c) else ("good" if c > 0 else "bad")
+            mark = "?" if pd.isna(c) else ("✓" if c > 0 else "✗")
+            tip = f'run {int(r["run_index"])} · {fval(v)}'
+            if is_cost and not pd.isna(r["thinking_tokens"]):
+                tip += f' · {int(r["thinking_tokens"]):,} think tok'
+            elif not is_cost and not pd.isna(r["cost"]):
+                tip += f' · ${r["cost"]:.4f}'
+            tip += f' · {mark}'
+            dots += (f'<span class="sp-dot {cls}" style="left:{xpct(v):.2f}%" '
+                     f'data-tip="{esc(tip)}"></span>')
+        nc = s["n_correct"]
+        badge = "" if (nc is None or pd.isna(nc)) else f' · {int(nc)}/{int(s["n_runs"])}✓'
+        rlabel = f'{num(s[f"{dimension}_ratio_maxmin"], ",.1f")}&times;{badge}'
+        rows += (f'<div class="sp-row"><div class="name">{esc(str(tid))}</div>'
+                 f'<div class="sp-track">{line}{mean}{dots}</div>'
+                 f'<div class="val">{rlabel}</div></div>')
+
+    legend = ('<span><span class="key" style="background:var(--good)"></span>solved</span>'
+              '<span><span class="key" style="background:var(--bad)"></span>failed</span>'
+              '<span><span class="key" style="background:var(--muted)"></span>ungraded</span>'
+              '<span>bar = min–max &middot; dashed = mean</span>')
+
+    table = (f'<table><tr><th>task</th><th>runs</th><th>n&#10003;</th>'
+             f'<th>{dimension} min</th><th>median</th><th>max</th>'
+             f'<th>cv</th><th>max/min</th></tr>')
+    for _, s in ranked.iterrows():
+        nc = s["n_correct"]
+        table += (f'<tr><td>{esc(str(s["task_id"]))}</td><td>{int(s["n_runs"])}</td>'
+                  f'<td>{"—" if (nc is None or pd.isna(nc)) else int(nc)}</td>'
+                  f'<td>{fval(s[f"{dimension}_min"])}</td>'
+                  f'<td>{fval(s[f"{dimension}_median"])}</td>'
+                  f'<td>{fval(s[f"{dimension}_max"])}</td>'
+                  f'<td>{num(s[f"{dimension}_cv"])}</td>'
+                  f'<td>{num(s[f"{dimension}_ratio_maxmin"], ",.1f")}&times;</td></tr>')
+    table += "</table>"
+
+    tid = str(task_id) if task_id is not None else (
+        ranked["task_id"].iloc[0] if len(ranked) else None)
+    detail = ""
+    if tid is not None:
+        g = recs[recs["task_id"] == tid]
+        if len(g):
+            first = g.iloc[0]
+            q = (first["origin_query"] if isinstance(first["origin_query"], str)
+                 else first["task_text"])
+            if isinstance(q, str) and q:
+                detail = (f'<div class="panel"><h2>Most variable task ({esc(str(tid))})</h2>'
+                          f'<pre>{esc(q)}</pre></div>')
+
+    mname = {"maxmin": "max/min ratio", "cv": "coefficient of variation",
+             "std": "std"}[metric]
+    sub = (f'{esc(benchmark)} &middot; {esc(model)} &middot; up to {summ["n_runs"]} '
+           f'independent runs per task &middot; ranked by {esc(mname)}')
+    headline = "bills" if is_cost else "thinking budgets"
+    unit_foot = ("cost = platform-billed USD at the time of the run"
+                 if is_cost else "thinking = hidden reasoning tokens")
+    panel_title = "Cost" if is_cost else "Thinking-token"
+    return f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{esc(model)} on {esc(benchmark)} — repeated-trial spread</title>
+<style>{_VIZ_CSS}{_SPREAD_CSS}</style></head>
+<body class="viz-root"><div class="viz-wrap">
+<h1>Same task, same model — unpredictable {headline}</h1>
+<div class="sub">{sub}</div>
+<div class="tiles">{tiles}</div>
+<div class="panel"><h2>{panel_title} spread across repeated runs (log scale)</h2>
+<div class="legend">{legend}</div>
+{axis}{rows}</div>
+<div class="panel"><h2>The numbers</h2>{table}</div>
+{detail}
+<div class="foot">each dot = one independent run of the same task &middot; {unit_foot}
+&middot; data: huggingface.co/datasets/{HF_REPO_ID}</div>
+</div><div id="tip"></div><script>{_VIZ_JS}</script></body></html>"""
+
+
+def to_csv(df, path, notes=FIELD_NOTES):
     """Write the DataFrame plus a <path>_README.txt with field definitions."""
     df.to_csv(path, index=False)
     readme = str(path).rsplit(".", 1)[0] + "_README.txt"
     with open(readme, "w") as f:
-        f.write(FIELD_NOTES)
+        f.write(notes)
     print(f"wrote {path} ({len(df)} rows) and {readme}")
 
 
@@ -733,6 +1096,28 @@ def _cli():
     s.add_argument("--top-k", type=int, default=10, metavar="N",
                    help="number of tasks to return (default: 10)")
 
+    s = add("spread", "Analyze one model's repeated independent runs of the same "
+            "tasks: how much the bill (or thinking tokens) swings run-to-run, and "
+            "whether the outcome flips. Ranks tasks by that variability. --out "
+            "FILE.html renders a log-scale distribution page, FILE.csv the per-task "
+            "stats (+ notes), anything else (or no --out) prints a text report.")
+    s.add_argument("--benchmark", required=True, metavar="BENCH",
+                   help="benchmark with repeated trials (see `list`: repeated_runs>0)")
+    s.add_argument("--model", required=True, metavar="MODEL",
+                   help="model to inspect")
+    s.add_argument("--dimension", choices=["cost", "thinking"], default="cost",
+                   help="what to measure the spread of (default: cost; thinking = "
+                        "hidden reasoning tokens, single-turn benchmarks only)")
+    s.add_argument("--metric", choices=["maxmin", "cv", "std"], default="maxmin",
+                   help="rank tasks by max/min ratio, coefficient of variation, or "
+                        "standard deviation (default: maxmin)")
+    s.add_argument("--flips-only", action="store_true",
+                   help="keep only tasks whose correctness changed across runs")
+    s.add_argument("--task-id", metavar="ID",
+                   help="detail this task (default: the most variable one)")
+    s.add_argument("--top-k", type=int, default=10, metavar="N",
+                   help="number of tasks to rank (default: 10)")
+
     a = p.parse_args()
     data = PriceReversalData(revision=a.revision, main_zip=a.main_zip,
                              extras_zip=a.extras_zip)
@@ -761,6 +1146,32 @@ def _cli():
         with open(out, "w") as f:
             f.write(page)
         print(f"wrote {out} — open it in a browser")
+        return
+    elif a.cmd == "spread":
+        try:
+            if a.out and a.out.endswith(".html"):
+                page = render_spread_html(data, a.benchmark, a.model,
+                                          dimension=a.dimension, metric=a.metric,
+                                          flips_only=a.flips_only, top_k=a.top_k,
+                                          task_id=a.task_id)
+                with open(a.out, "w") as f:
+                    f.write(page)
+                print(f"wrote {a.out} — open it in a browser")
+            elif a.out and a.out.endswith(".csv"):
+                st = data.find_variable(a.benchmark, a.model, a.dimension,
+                                        a.metric, a.flips_only, a.top_k)
+                to_csv(st, a.out, notes=SPREAD_FIELD_NOTES)
+            else:
+                text = render_spread(data, a.benchmark, a.model, a.dimension,
+                                     a.metric, a.flips_only, a.top_k, a.task_id)
+                if a.out:
+                    with open(a.out, "w") as f:
+                        f.write(text)
+                    print(f"wrote {a.out}")
+                else:
+                    print(text)
+        except (KeyError, RuntimeError) as e:
+            sys.exit(e.args[0] if e.args else str(e))
         return
     else:
         df = data.find_examples(a.category, a.model_a, a.model_b,

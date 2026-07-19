@@ -43,6 +43,34 @@ need no arguments.
 `--out file.csv` on `find` exports the table plus a `*_README.txt`
 explaining every field (token definitions, cost basis).
 
+## Repeated trials (same task, same model, N runs)
+
+Some benchmarks ship 5 independent runs of every task per model (see the
+`repeated_runs` column in `list`). `spread` shows how unstable the bill is
+run-to-run — identical input, very different cost, sometimes a flipped answer:
+
+```bash
+# rank aime tasks by how much gpt-5.4's bill swings across its 5 runs
+python case_study.py spread --benchmark aime-hybrid --model gpt-5.4
+
+# the same as a self-contained HTML strip plot
+# (each dot = one run, green/red = right/wrong, bar = min–max, dashed = mean)
+python case_study.py spread --benchmark aime-hybrid --model gpt-5.4 --out spread.html
+
+# thinking-token variance instead of cost, and only tasks whose answer flipped
+python case_study.py spread --benchmark aime-hybrid --model gpt-5.4 \
+    --dimension thinking --flips-only
+```
+
+Options: `--dimension cost|thinking`, `--metric maxmin|cv|std` (how to rank),
+`--flips-only`, `--task-id ID`, `--top-k N`. `--out FILE.html` renders the
+plot, `FILE.csv` writes the per-task stats (plus `*_README.txt`), anything else
+prints text. Repeated trials are available for `aime-hybrid`, `gpqa-test`, and
+`tb2-terminus2` (tb2 records cost only, no thinking split).
+
+Pre-rendered `spread` pages for the six frontier models on AIME and
+TerminalBench-2 live in [`spread_examples/`](spread_examples/).
+
 ## Notes
 
 - **cost** is the platform-billed USD at the time of the run (early-2026

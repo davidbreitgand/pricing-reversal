@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gpt-5.2-high on gpqa-test — repeated-trial spread</title>
+<style>
+.viz-root { --surface-1:#fcfcfb; --page:#f9f9f7; --ink-1:#0b0b0b; --ink-2:#52514e;
+  --muted:#898781; --grid:#e1e0d9; --border:rgba(11,11,11,0.10);
+  --c-prompt:#2a78d6; --c-cache:#86b6ef; --c-think:#4a3aa7; --c-visible:#1baf7a;
+  --good:#0ca30c; --bad:#d03b3b;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink-1); background: var(--page); margin:0; padding:24px; }
+@media (prefers-color-scheme: dark) {
+  .viz-root { --surface-1:#1a1a19; --page:#0d0d0d; --ink-1:#ffffff; --ink-2:#c3c2b7;
+    --grid:#2c2c2a; --border:rgba(255,255,255,0.10);
+    --c-prompt:#3987e5; --c-cache:#184f95; --c-think:#9085e9; --c-visible:#199e70; } }
+.viz-wrap { max-width: 920px; margin: 0 auto; }
+.viz-root h1 { font-size:20px; margin:0 0 4px; }
+.viz-root .sub { color:var(--ink-2); font-size:13px; margin-bottom:20px; }
+.panel { background:var(--surface-1); border:1px solid var(--border);
+  border-radius:8px; padding:16px 20px; margin-bottom:16px; }
+.panel h2 { font-size:13px; font-weight:600; color:var(--ink-2);
+  text-transform:none; margin:0 0 12px; }
+.tiles { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
+.tile { background:var(--surface-1); border:1px solid var(--border);
+  border-radius:8px; padding:12px 16px; flex:1; min-width:130px; }
+.tile .lbl { font-size:12px; color:var(--ink-2); margin-bottom:4px; }
+.tile .val { font-size:26px; font-weight:600; }
+.row { display:grid; grid-template-columns:150px 1fr 90px; align-items:center;
+  gap:10px; margin:8px 0; }
+.row .name { font-size:13px; color:var(--ink-1); text-align:right;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.row .val { font-size:13px; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.track { position:relative; height:20px; }
+.bar { position:absolute; top:0; height:20px; border-radius:0 4px 4px 0; }
+.seg { display:inline-block; height:20px; margin-right:2px; vertical-align:top; }
+.seg:last-child { border-radius:0 4px 4px 0; margin-right:0; }
+.legend { display:flex; gap:16px; font-size:12px; color:var(--ink-2);
+  margin:10px 0 2px; flex-wrap:wrap; }
+.key { display:inline-block; width:10px; height:10px; border-radius:2px;
+  margin-right:5px; vertical-align:baseline; }
+.badge { font-size:12px; font-weight:600; }
+.badge.good { color:var(--good); } .badge.bad { color:var(--bad); }
+.viz-root table { border-collapse:collapse; font-size:13px; width:100%; }
+.viz-root th { text-align:right; color:var(--ink-2); font-weight:600;
+  border-bottom:1px solid var(--grid); padding:6px 10px; }
+.viz-root td { text-align:right; padding:6px 10px;
+  border-bottom:1px solid var(--grid); font-variant-numeric:tabular-nums; }
+.viz-root th:first-child, .viz-root td:first-child { text-align:left; }
+.viz-root pre { white-space:pre-wrap; word-break:break-word; font-size:12.5px;
+  line-height:1.5; background:var(--page); border:1px solid var(--grid);
+  border-radius:6px; padding:10px 12px; margin:8px 0; }
+.viz-root details > summary { cursor:pointer; font-size:13px; color:var(--ink-2);
+  margin:4px 0; }
+.turn-role { font-size:11px; font-weight:600; color:var(--muted);
+  margin:10px 0 2px; text-transform:uppercase; letter-spacing:.04em; }
+.foot { color:var(--muted); font-size:12px; margin-top:20px; line-height:1.5; }
+#tip { position:fixed; opacity:0; pointer-events:none; background:var(--ink-1);
+  color:var(--surface-1); font-size:12px; padding:4px 8px; border-radius:4px;
+  transition:opacity .1s; z-index:10; }
+
+.sp-axis { position:relative; height:16px; margin:2px 0 8px; }
+.sp-axis span { position:absolute; transform:translateX(-50%); font-size:10px;
+  color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.sp-row { display:grid; grid-template-columns:60px 1fr 175px; align-items:center;
+  gap:12px; margin:5px 0; }
+.sp-row .name { font-size:12px; color:var(--ink-1); text-align:right;
+  font-variant-numeric:tabular-nums; }
+.sp-row .val { font-size:12px; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.sp-track { position:relative; height:20px; }
+.sp-line { position:absolute; top:9px; height:2px; background:var(--grid);
+  border-radius:2px; }
+.sp-mean { position:absolute; top:1px; height:18px; border-left:1.5px dashed var(--muted); }
+.sp-dot { position:absolute; top:4px; width:12px; height:12px; margin-left:-6px;
+  border-radius:50%; border:1px solid var(--surface-1); box-sizing:border-box; }
+.sp-dot.good { background:var(--good); } .sp-dot.bad { background:var(--bad); }
+.sp-dot.na { background:var(--muted); }
+</style></head>
+<body class="viz-root"><div class="viz-wrap">
+<h1>Same task, same model — unpredictable bills</h1>
+<div class="sub">gpqa-test &middot; gpt-5.2-high &middot; up to 5 independent runs per task &middot; ranked by max/min ratio</div>
+<div class="tiles"><div class="tile"><div class="lbl">runs / task</div><div class="val">5</div></div><div class="tile"><div class="lbl">median cost CV</div><div class="val">0.17</div></div><div class="tile"><div class="lbl">worst max/min</div><div class="val">11.0&times;</div></div><div class="tile"><div class="lbl">tasks &gt;2&times;</div><div class="val">30%</div></div></div>
+<div class="panel"><h2>Cost spread across repeated runs (log scale)</h2>
+<div class="legend"><span><span class="key" style="background:var(--good)"></span>solved</span><span><span class="key" style="background:var(--bad)"></span>failed</span><span><span class="key" style="background:var(--muted)"></span>ungraded</span><span>bar = min–max &middot; dashed = mean</span></div>
+<div class="sp-row"><div class="name"></div><div class="sp-axis"><span style="left:0.0%">$0.0162</span><span style="left:33.3%">$0.0599</span><span style="left:66.7%">$0.2224</span><span style="left:100.0%">$0.8249</span></div><div class="val"></div></div><div class="sp-row"><div class="name">80</div><div class="sp-track"><div class="sp-line" style="left:32.45%;right:6.65%"></div><div class="sp-mean" style="left:78.66%"></div><span class="sp-dot na" style="left:64.92%" data-tip="run 0 · $0.2076 · 14,458 think tok · ?"></span><span class="sp-dot na" style="left:32.45%" data-tip="run 1 · $0.0579 · 3,849 think tok · ?"></span><span class="sp-dot na" style="left:87.39%" data-tip="run 2 · $0.5024 · 35,552 think tok · ?"></span><span class="sp-dot na" style="left:93.35%" data-tip="run 3 · $0.6351 · 45,019 think tok · ?"></span><span class="sp-dot na" style="left:80.24%" data-tip="run 4 · $0.3792 · 26,742 think tok · ?"></span></div><div class="val">$0.0579–$0.6351 · 11.0&times;</div></div><div class="sp-row"><div class="name">95</div><div class="sp-track"><div class="sp-line" style="left:29.29%;right:18.00%"></div><div class="sp-mean" style="left:62.69%"></div><span class="sp-dot na" style="left:82.00%" data-tip="run 0 · $0.4065 · 28,779 think tok · ?"></span><span class="sp-dot na" style="left:31.50%" data-tip="run 1 · $0.0558 · 3,731 think tok · ?"></span><span class="sp-dot na" style="left:29.29%" data-tip="run 2 · $0.0511 · 3,390 think tok · ?"></span><span class="sp-dot na" style="left:54.00%" data-tip="run 3 · $0.1351 · 9,341 think tok · ?"></span><span class="sp-dot na" style="left:74.47%" data-tip="run 4 · $0.3022 · 21,322 think tok · ?"></span></div><div class="val">$0.0511–$0.4065 · 8.0&times;</div></div><div class="sp-row"><div class="name">77</div><div class="sp-track"><div class="sp-line" style="left:13.20%;right:43.25%"></div><div class="sp-mean" style="left:40.31%"></div><span class="sp-dot na" style="left:56.75%" data-tip="run 0 · $0.1505 · 10,440 think tok · ?"></span><span class="sp-dot na" style="left:13.20%" data-tip="run 1 · $0.0271 · 1,511 think tok · ?"></span><span class="sp-dot na" style="left:29.24%" data-tip="run 2 · $0.0510 · 3,234 think tok · ?"></span><span class="sp-dot na" style="left:30.87%" data-tip="run 3 · $0.0544 · 3,552 think tok · ?"></span><span class="sp-dot na" style="left:49.05%" data-tip="run 4 · $0.1112 · 7,599 think tok · ?"></span></div><div class="val">$0.0271–$0.1505 · 5.5&times;</div></div><div class="sp-row"><div class="name">128</div><div class="sp-track"><div class="sp-line" style="left:15.25%;right:41.31%"></div><div class="sp-mean" style="left:44.41%"></div><span class="sp-dot na" style="left:15.25%" data-tip="run 0 · $0.0294 · 1,451 think tok · ?"></span><span class="sp-dot na" style="left:39.19%" data-tip="run 1 · $0.0755 · 4,673 think tok · ?"></span><span class="sp-dot na" style="left:49.11%" data-tip="run 2 · $0.1115 · 7,207 think tok · ?"></span><span class="sp-dot na" style="left:42.07%" data-tip="run 3 · $0.0845 · 5,322 think tok · ?"></span><span class="sp-dot na" style="left:58.69%" data-tip="run 4 · $0.1625 · 10,968 think tok · ?"></span></div><div class="val">$0.0294–$0.1625 · 5.5&times;</div></div><div class="sp-row"><div class="name">103</div><div class="sp-track"><div class="sp-line" style="left:36.71%;right:22.47%"></div><div class="sp-mean" style="left:63.44%"></div><span class="sp-dot na" style="left:71.71%" data-tip="run 0 · $0.2711 · 18,934 think tok · ?"></span><span class="sp-dot na" style="left:36.71%" data-tip="run 1 · $0.0685 · 4,437 think tok · ?"></span><span class="sp-dot na" style="left:77.53%" data-tip="run 2 · $0.3408 · 23,909 think tok · ?"></span><span class="sp-dot na" style="left:62.13%" data-tip="run 3 · $0.1860 · 12,781 think tok · ?"></span><span class="sp-dot na" style="left:49.40%" data-tip="run 4 · $0.1128 · 7,552 think tok · ?"></span></div><div class="val">$0.0685–$0.3408 · 5.0&times;</div></div><div class="sp-row"><div class="name">110</div><div class="sp-track"><div class="sp-line" style="left:20.71%;right:39.44%"></div><div class="sp-mean" style="left:40.94%"></div><span class="sp-dot na" style="left:20.71%" data-tip="run 0 · $0.0365 · 1,963 think tok · ?"></span><span class="sp-dot na" style="left:25.82%" data-tip="run 1 · $0.0446 · 2,542 think tok · ?"></span><span class="sp-dot na" style="left:60.56%" data-tip="run 2 · $0.1749 · 11,870 think tok · ?"></span><span class="sp-dot na" style="left:41.69%" data-tip="run 3 · $0.0832 · 5,170 think tok · ?"></span><span class="sp-dot na" style="left:35.40%" data-tip="run 4 · $0.0650 · 4,093 think tok · ?"></span></div><div class="val">$0.0365–$0.1749 · 4.8&times;</div></div><div class="sp-row"><div class="name">131</div><div class="sp-track"><div class="sp-line" style="left:23.70%;right:37.16%"></div><div class="sp-mean" style="left:48.44%"></div><span class="sp-dot na" style="left:42.63%" data-tip="run 0 · $0.0864 · 5,762 think tok · ?"></span><span class="sp-dot na" style="left:39.60%" data-tip="run 1 · $0.0767 · 5,022 think tok · ?"></span><span class="sp-dot na" style="left:56.24%" data-tip="run 2 · $0.1475 · 10,159 think tok · ?"></span><span class="sp-dot na" style="left:62.84%" data-tip="run 3 · $0.1913 · 13,243 think tok · ?"></span><span class="sp-dot na" style="left:23.70%" data-tip="run 4 · $0.0410 · 2,600 think tok · ?"></span></div><div class="val">$0.0410–$0.1913 · 4.7&times;</div></div><div class="sp-row"><div class="name">156</div><div class="sp-track"><div class="sp-line" style="left:0.00%;right:61.49%"></div><div class="sp-mean" style="left:18.56%"></div><span class="sp-dot na" style="left:38.51%" data-tip="run 0 · $0.0735 · 4,908 think tok · ?"></span><span class="sp-dot na" style="left:20.71%" data-tip="run 1 · $0.0365 · 2,265 think tok · ?"></span><span class="sp-dot na" style="left:0.00%" data-tip="run 2 · $0.0162 · 821 think tok · ?"></span><span class="sp-dot na" style="left:6.26%" data-tip="run 3 · $0.0207 · 1,173 think tok · ?"></span><span class="sp-dot na" style="left:6.51%" data-tip="run 4 · $0.0209 · 1,192 think tok · ?"></span></div><div class="val">$0.0162–$0.0735 · 4.5&times;</div></div><div class="sp-row"><div class="name">116</div><div class="sp-track"><div class="sp-line" style="left:48.86%;right:15.57%"></div><div class="sp-mean" style="left:74.06%"></div><span class="sp-dot na" style="left:75.51%" data-tip="run 0 · $0.3149 · 22,186 think tok · ?"></span><span class="sp-dot na" style="left:48.86%" data-tip="run 1 · $0.1104 · 7,508 think tok · ?"></span><span class="sp-dot na" style="left:62.22%" data-tip="run 2 · $0.1867 · 12,959 think tok · ?"></span><span class="sp-dot na" style="left:84.43%" data-tip="run 3 · $0.4472 · 31,606 think tok · ?"></span><span class="sp-dot na" style="left:83.29%" data-tip="run 4 · $0.4276 · 30,271 think tok · ?"></span></div><div class="val">$0.1104–$0.4472 · 4.1&times;</div></div><div class="sp-row"><div class="name">86</div><div class="sp-track"><div class="sp-line" style="left:30.03%;right:35.58%"></div><div class="sp-mean" style="left:50.36%"></div><span class="sp-dot na" style="left:32.86%" data-tip="run 0 · $0.0588 · 3,733 think tok · ?"></span><span class="sp-dot na" style="left:30.03%" data-tip="run 1 · $0.0526 · 3,470 think tok · ?"></span><span class="sp-dot na" style="left:37.99%" data-tip="run 2 · $0.0720 · 4,449 think tok · ?"></span><span class="sp-dot na" style="left:63.76%" data-tip="run 3 · $0.1984 · 13,736 think tok · ?"></span><span class="sp-dot na" style="left:64.42%" data-tip="run 4 · $0.2036 · 14,127 think tok · ?"></span></div><div class="val">$0.0526–$0.2036 · 3.9&times;</div></div><div class="sp-row"><div class="name">72</div><div class="sp-track"><div class="sp-line" style="left:66.65%;right:0.00%"></div><div class="sp-mean" style="left:92.59%"></div><span class="sp-dot na" style="left:94.48%" data-tip="run 0 · $0.6639 · 47,058 think tok · ?"></span><span class="sp-dot na" style="left:66.65%" data-tip="run 1 · $0.2222 · 15,520 think tok · ?"></span><span class="sp-dot na" style="left:94.60%" data-tip="run 2 · $0.6672 · 47,243 think tok · ?"></span><span class="sp-dot na" style="left:95.95%" data-tip="run 3 · $0.7035 · 50,002 think tok · ?"></span><span class="sp-dot na" style="left:100.00%" data-tip="run 4 · $0.8249 · 58,634 think tok · ?"></span></div><div class="val">$0.2222–$0.8249 · 3.7&times;</div></div><div class="sp-row"><div class="name">62</div><div class="sp-track"><div class="sp-line" style="left:22.15%;right:44.68%"></div><div class="sp-mean" style="left:40.74%"></div><span class="sp-dot na" style="left:40.77%" data-tip="run 0 · $0.0803 · 5,399 think tok · ?"></span><span class="sp-dot na" style="left:41.84%" data-tip="run 1 · $0.0837 · 5,719 think tok · ?"></span><span class="sp-dot na" style="left:55.32%" data-tip="run 2 · $0.1423 · 9,895 think tok · ?"></span><span class="sp-dot na" style="left:31.61%" data-tip="run 3 · $0.0560 · 3,667 think tok · ?"></span><span class="sp-dot na" style="left:22.15%" data-tip="run 4 · $0.0386 · 2,483 think tok · ?"></span></div><div class="val">$0.0386–$0.1423 · 3.7&times;</div></div><div class="sp-row"><div class="name">94</div><div class="sp-track"><div class="sp-line" style="left:21.53%;right:45.49%"></div><div class="sp-mean" style="left:42.80%"></div><span class="sp-dot na" style="left:45.79%" data-tip="run 0 · $0.0978 · 6,739 think tok · ?"></span><span class="sp-dot na" style="left:21.53%" data-tip="run 1 · $0.0377 · 2,345 think tok · ?"></span><span class="sp-dot na" style="left:45.77%" data-tip="run 2 · $0.0977 · 6,720 think tok · ?"></span><span class="sp-dot na" style="left:34.93%" data-tip="run 3 · $0.0638 · 4,272 think tok · ?"></span><span class="sp-dot na" style="left:54.51%" data-tip="run 4 · $0.1378 · 9,527 think tok · ?"></span></div><div class="val">$0.0377–$0.1378 · 3.7&times;</div></div><div class="sp-row"><div class="name">79</div><div class="sp-track"><div class="sp-line" style="left:16.22%;right:51.74%"></div><div class="sp-mean" style="left:33.21%"></div><span class="sp-dot na" style="left:31.59%" data-tip="run 0 · $0.0560 · 3,609 think tok · ?"></span><span class="sp-dot na" style="left:48.26%" data-tip="run 1 · $0.1078 · 7,369 think tok · ?"></span><span class="sp-dot na" style="left:22.81%" data-tip="run 2 · $0.0396 · 2,457 think tok · ?"></span><span class="sp-dot na" style="left:16.22%" data-tip="run 3 · $0.0306 · 1,827 think tok · ?"></span><span class="sp-dot na" style="left:35.12%" data-tip="run 4 · $0.0643 · 4,229 think tok · ?"></span></div><div class="val">$0.0306–$0.1078 · 3.5&times;</div></div><div class="sp-row"><div class="name">91</div><div class="sp-track"><div class="sp-line" style="left:21.88%;right:46.24%"></div><div class="sp-mean" style="left:42.38%"></div><span class="sp-dot na" style="left:53.76%" data-tip="run 0 · $0.1339 · 9,270 think tok · ?"></span><span class="sp-dot na" style="left:37.38%" data-tip="run 1 · $0.0703 · 4,697 think tok · ?"></span><span class="sp-dot na" style="left:21.88%" data-tip="run 2 · $0.0382 · 2,381 think tok · ?"></span><span class="sp-dot na" style="left:35.95%" data-tip="run 3 · $0.0664 · 4,444 think tok · ?"></span><span class="sp-dot na" style="left:50.77%" data-tip="run 4 · $0.1190 · 8,223 think tok · ?"></span></div><div class="val">$0.0382–$0.1339 · 3.5&times;</div></div></div>
+<div class="panel"><h2>The numbers</h2><table><tr><th>task</th><th>runs</th><th>n&#10003;</th><th>cost min</th><th>median</th><th>max</th><th>cv</th><th>max/min</th></tr><tr><td>80</td><td>5</td><td>—</td><td>$0.0579</td><td>$0.3792</td><td>$0.6351</td><td>0.64</td><td>11.0&times;</td></tr><tr><td>95</td><td>5</td><td>—</td><td>$0.0511</td><td>$0.1351</td><td>$0.4065</td><td>0.83</td><td>8.0&times;</td></tr><tr><td>77</td><td>5</td><td>—</td><td>$0.0271</td><td>$0.0544</td><td>$0.1505</td><td>0.64</td><td>5.5&times;</td></tr><tr><td>128</td><td>5</td><td>—</td><td>$0.0294</td><td>$0.0845</td><td>$0.1625</td><td>0.53</td><td>5.5&times;</td></tr><tr><td>103</td><td>5</td><td>—</td><td>$0.0685</td><td>$0.1860</td><td>$0.3408</td><td>0.57</td><td>5.0&times;</td></tr><tr><td>110</td><td>5</td><td>—</td><td>$0.0365</td><td>$0.0650</td><td>$0.1749</td><td>0.69</td><td>4.8&times;</td></tr><tr><td>131</td><td>5</td><td>—</td><td>$0.0410</td><td>$0.0864</td><td>$0.1913</td><td>0.55</td><td>4.7&times;</td></tr><tr><td>156</td><td>5</td><td>—</td><td>$0.0162</td><td>$0.0209</td><td>$0.0735</td><td>0.70</td><td>4.5&times;</td></tr><tr><td>116</td><td>5</td><td>—</td><td>$0.1104</td><td>$0.3149</td><td>$0.4472</td><td>0.50</td><td>4.1&times;</td></tr><tr><td>86</td><td>5</td><td>—</td><td>$0.0526</td><td>$0.0720</td><td>$0.2036</td><td>0.66</td><td>3.9&times;</td></tr><tr><td>72</td><td>5</td><td>—</td><td>$0.2222</td><td>$0.6672</td><td>$0.8249</td><td>0.37</td><td>3.7&times;</td></tr><tr><td>62</td><td>5</td><td>—</td><td>$0.0386</td><td>$0.0803</td><td>$0.1423</td><td>0.49</td><td>3.7&times;</td></tr><tr><td>94</td><td>5</td><td>—</td><td>$0.0377</td><td>$0.0977</td><td>$0.1378</td><td>0.44</td><td>3.7&times;</td></tr><tr><td>79</td><td>5</td><td>—</td><td>$0.0306</td><td>$0.0560</td><td>$0.1078</td><td>0.50</td><td>3.5&times;</td></tr><tr><td>91</td><td>5</td><td>—</td><td>$0.0382</td><td>$0.0703</td><td>$0.1339</td><td>0.46</td><td>3.5&times;</td></tr></table></div>
+<div class="panel"><h2>Most variable task (80)</h2><pre>You come across an algorithm that gives the following output (written as input -&gt; output):
+
+AGG -&gt; 115
+TGCTGA -&gt; 176
+
+What value does ACAGTGACC give?</pre></div>
+<div class="foot">each dot = one independent run of the same task &middot; cost = platform-billed USD at the time of the run
+&middot; data: huggingface.co/datasets/price-reversal/price-reversal</div>
+</div><div id="tip"></div><script>
+var tip = document.getElementById('tip');
+document.querySelectorAll('[data-tip]').forEach(function (el) {
+  el.addEventListener('mousemove', function (e) {
+    tip.textContent = el.dataset.tip;
+    tip.style.left = (e.clientX + 12) + 'px';
+    tip.style.top = (e.clientY + 12) + 'px';
+    tip.style.opacity = 1;
+  });
+  el.addEventListener('mouseleave', function () { tip.style.opacity = 0; });
+});
+</script></body></html>
